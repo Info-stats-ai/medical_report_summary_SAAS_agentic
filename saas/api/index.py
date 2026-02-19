@@ -10,7 +10,8 @@ clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
 clerk_guard = ClerkHTTPBearer(clerk_config)
 
 
-class Visit(BaseModel):
+class Visit(BaseModel):# pydatntic to use validation
+    # defining schema
     patient_name: str
     date_of_visit: str
     notes: str
@@ -34,6 +35,12 @@ Notes:
 {visit.notes}"""
 
 
+def is_premium(creds: HTTPAuthorizationCredentials) -> bool:
+    """Check if user has premium_subscription from Clerk JWT 'pla' claim (e.g. u:premium_subscription)."""
+    pla = creds.decoded.get("pla") or ""
+    return "premium_subscription" in pla
+
+
 @app.post("/api")
 def consultation_summary(
     visit: Visit,
@@ -41,6 +48,8 @@ def consultation_summary(
 ):
     user_id = creds.decoded["sub"]  # Available for tracking/auditing
     client = OpenAI()
+
+    model = "gpt-5-nano" if is_premium(creds) else "gpt-4o-mini"
 
     user_prompt = user_prompt_for(visit)
 
@@ -50,7 +59,7 @@ def consultation_summary(
     ]
 
     stream = client.chat.completions.create(
-        model="gpt-5-nano",
+        model=model,
         messages=prompt,
         stream=True,
     )
