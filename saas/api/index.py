@@ -1,8 +1,11 @@
 import base64
 import io
 import os
+import uuid
+from contextlib import contextmanager
 from typing import Optional  # type: ignore
 
+import psycopg2  # type: ignore
 from fastapi import FastAPI, Depends, HTTPException  # type: ignore
 from fastapi.responses import StreamingResponse  # type: ignore
 from pydantic import BaseModel  # type: ignore
@@ -11,6 +14,62 @@ from openai import OpenAI  # type: ignore
 from pypdf import PdfReader  # type: ignore
 
 app = FastAPI()
+
+# Postgres: use POSTGRES_URL or DATABASE_URL
+def _get_postgres_url() -> Optional[str]:
+    return os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL")
+
+@contextmanager
+def get_db():
+    url = _get_postgres_url()
+    if not url:
+        raise HTTPException(status_code=503, detail="Database not configured (set POSTGRES_URL or DATABASE_URL)")
+    conn = psycopg2.connect(url)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def ensure_history_table(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS consultation_history (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id TEXT NOT NULL,
+                patient_name TEXT NOT NULL,
+                date_of_visit DATE NOT NULL,
+                summary TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+        """)
+
+def save_history_entry(conn, user_id: str, patient_name: str, date_of_visit: str, summary: str) -> str:
+    ensure_history_table(conn)
+    entry_id = str(uuid.uuid4())
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO consultation_history (id, user_id, patient_name, date_of_visit, summary) VALUES (%s, %s, %s, %s, %s)",
+            (entry_id, user_id, patient_name, date_of_visit, summary),
+        )
+    return entry_id
+
+def list_history_for_user(conn, user_id: str, limit: int = 50):
+    ensure_history_table(conn)
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, patient_name, date_of_visit, summary, created_at
+               FROM consultation_history WHERE user_id = %s ORDER BY created_at DESC LIMIT %s""",
+            (user_id, limit),
+        )
+        rows = cur.fetchall()
+    return [
+        {"id": str(r[0]), "patient_name": r[1], "date_of_visit": str(r[2]), "summary": r[3], "created_at": r[4].isoformat()}
+        for r in rows
+    ]
 clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
 clerk_guard = ClerkHTTPBearer(clerk_config)
 
@@ -21,6 +80,12 @@ class Visit(BaseModel):
     notes: Optional[str] = None
     file_base64: Optional[str] = None
     file_mime: Optional[str] = None
+
+
+class HistoryEntryCreate(BaseModel):
+    patient_name: str
+    date_of_visit: str
+    summary: str
 
 
 system_prompt = """
@@ -129,3 +194,36 @@ def consultation_summary(
                 yield f"data: {lines[-1]}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/history")
+def create_history_entry(
+    body: HistoryEntryCreate,
+    creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
+):
+    """Save a consultation summary to Postgres (call after stream completes)."""
+    user_id = creds.decoded["sub"]
+    try:
+        with get_db() as conn:
+            entry_id = save_history_entry(
+                conn, user_id, body.patient_name, body.date_of_visit, body.summary
+            )
+        return {"id": entry_id, "ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/history")
+def get_history(creds: HTTPAuthorizationCredentials = Depends(clerk_guard)):
+    """List current user's consultation history from Postgres."""
+    user_id = creds.decoded["sub"]
+    try:
+        with get_db() as conn:
+            entries = list_history_for_user(conn, user_id)
+        return {"history": entries}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

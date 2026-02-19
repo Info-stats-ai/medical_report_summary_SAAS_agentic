@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import DatePicker from 'react-datepicker';
 import ReactMarkdown from 'react-markdown';
@@ -24,18 +24,28 @@ function ConsultationForm() {
     const [output, setOutput] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // History (localStorage) — list of past summaries
-    const HISTORY_KEY = 'medinotes_history';
-    const MAX_HISTORY = 50;
+    // History from Postgres (via API)
     type HistoryEntry = { id: string; patient_name: string; date_of_visit: string; summary: string; created_at: string };
-    const [history, setHistory] = useState<HistoryEntry[]>(() => {
-        if (typeof window === 'undefined') return [];
+    const [history, setHistory] = useState<HistoryEntry[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(true);
+
+    async function fetchHistory() {
+        const jwt = await getToken();
+        if (!jwt) {
+            setHistoryLoading(false);
+            return;
+        }
         try {
-            const raw = localStorage.getItem(HISTORY_KEY);
-            const parsed = raw ? JSON.parse(raw) : [];
-            return Array.isArray(parsed) ? parsed.slice(0, MAX_HISTORY) : [];
-        } catch { return []; }
-    });
+            const res = await fetch('/api/history', { headers: { Authorization: `Bearer ${jwt}` } });
+            if (res.ok) {
+                const data = await res.json();
+                setHistory(data.history || []);
+            }
+        } catch (_) {}
+        setHistoryLoading(false);
+    }
+
+    useEffect(() => { fetchHistory(); }, []);
 
     const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
     const ACCEPT = '.pdf,image/*';
@@ -90,7 +100,7 @@ function ConsultationForm() {
         const controller = new AbortController();
         let buffer = '';
 
-        await fetchEventSource('/api', {
+        await fetchEventSource('/api/consultation', {
             signal: controller.signal,
             method: 'POST',
             headers: {
@@ -105,18 +115,21 @@ function ConsultationForm() {
             onclose() {
                 setLoading(false);
                 if (buffer.trim()) {
-                    const entry: HistoryEntry = {
-                        id: crypto.randomUUID(),
-                        patient_name: patientName,
-                        date_of_visit: visitDate?.toISOString().slice(0, 10) || '',
-                        summary: buffer,
-                        created_at: new Date().toISOString(),
-                    };
-                    setHistory(prev => {
-                        const next = [entry, ...prev].slice(0, MAX_HISTORY);
-                        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch (_) {}
-                        return next;
-                    });
+                    const dateStr = visitDate?.toISOString().slice(0, 10) || '';
+                    fetch('/api/history', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${jwt}`,
+                        },
+                        body: JSON.stringify({
+                            patient_name: patientName,
+                            date_of_visit: dateStr,
+                            summary: buffer,
+                        }),
+                    })
+                        .then((r) => { if (r.ok) void fetchHistory(); })
+                        .catch(() => {});
                 }
             },
             onerror(err) {
@@ -213,29 +226,35 @@ function ConsultationForm() {
                 </section>
             )}
 
-            {history.length > 0 && (
-                <section className="mt-10 border-t border-gray-200 dark:border-gray-700 pt-8">
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Past summaries</h2>
-                    <ul className="space-y-2">
-                        {history.map((entry) => (
-                            <li key={entry.id}>
-                                <button
-                                    type="button"
-                                    onClick={() => setOutput(entry.summary)}
-                                    className="w-full text-left px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-                                >
-                                    <span className="font-medium text-gray-900 dark:text-gray-100">{entry.patient_name}</span>
-                                    <span className="text-gray-500 dark:text-gray-400 text-sm ml-2">{entry.date_of_visit}</span>
-                                    <span className="text-gray-400 dark:text-gray-500 text-xs ml-2">
-                                        {new Date(entry.created_at).toLocaleString()}
-                                    </span>
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Stored in this browser. Click to view.</p>
-                </section>
-            )}
+            <section className="mt-10 border-t border-gray-200 dark:border-gray-700 pt-8">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Past summaries</h2>
+                {historyLoading ? (
+                    <p className="text-gray-500 dark:text-gray-400 text-sm">Loading history…</p>
+                ) : history.length === 0 ? (
+                    <p className="text-gray-500 dark:text-gray-400 text-sm">No past summaries yet. They are stored in the database.</p>
+                ) : (
+                    <>
+                        <ul className="space-y-2">
+                            {history.map((entry) => (
+                                <li key={entry.id}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOutput(entry.summary)}
+                                        className="w-full text-left px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                    >
+                                        <span className="font-medium text-gray-900 dark:text-gray-100">{entry.patient_name}</span>
+                                        <span className="text-gray-500 dark:text-gray-400 text-sm ml-2">{entry.date_of_visit}</span>
+                                        <span className="text-gray-400 dark:text-gray-500 text-xs ml-2">
+                                            {new Date(entry.created_at).toLocaleString()}
+                                        </span>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Stored in Postgres. Click to view.</p>
+                    </>
+                )}
+            </section>
         </div>
     );
 }

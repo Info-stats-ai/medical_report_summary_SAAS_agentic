@@ -4,3 +4,4 @@ openai
 fastapi-clerk-auth
 pydantic
 pypdf
+psycopg2-binary
