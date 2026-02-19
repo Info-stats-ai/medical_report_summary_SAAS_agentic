@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
-import { Protect, PricingTable, UserButton } from '@clerk/nextjs';
+import { Protect, SignInButton, UserButton } from '@clerk/nextjs';
 
 function ConsultationForm() {
     const { getToken } = useAuth();
@@ -145,22 +145,21 @@ export default function Product() {
                 <UserButton showName={true} />
             </div>
 
-            {/* Subscription Protection */}
+            {/* Login required — no plan required; free and premium both see the app */}
             <Protect
-                plan="premium_subscription"
                 fallback={
-                    <div className="container mx-auto px-4 py-12">
-                        <header className="text-center mb-12">
-                            <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent mb-4">
-                                Healthcare Professional Plan
-                            </h1>
-                            <p className="text-gray-600 dark:text-gray-400 text-lg mb-8">
-                                Streamline your patient consultations with AI-powered summaries
-                            </p>
-                        </header>
-                        <div className="max-w-4xl mx-auto">
-                            <PricingTable />
-                        </div>
+                    <div className="container mx-auto px-4 py-24 text-center">
+                        <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-100 mb-4">
+                            Sign in to use the Consultation Assistant
+                        </h1>
+                        <p className="text-gray-600 dark:text-gray-400 mb-8">
+                            You need to be signed in to generate summaries and patient emails.
+                        </p>
+                        <SignInButton mode="modal">
+                            <button className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-lg">
+                                Sign in
+                            </button>
+                        </SignInButton>
                     </div>
                 }
             >

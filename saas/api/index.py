@@ -49,7 +49,7 @@ def consultation_summary(
     user_id = creds.decoded["sub"]  # Available for tracking/auditing
     client = OpenAI()
 
-    model = "gpt-5-nano" if is_premium(creds) else "gpt-4o-mini"
+    model = "gpt-5" if is_premium(creds) else "gpt-4o-mini"
 
     user_prompt = user_prompt_for(visit)
 
