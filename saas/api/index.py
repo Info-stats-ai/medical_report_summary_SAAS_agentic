@@ -155,7 +155,7 @@ def is_premium(creds: HTTPAuthorizationCredentials) -> bool:
     return "premium_subscription" in pla
 
 
-@app.post("/api")
+@app.post("/api/consultation")
 def consultation_summary(
     visit: Visit,
     creds: HTTPAuthorizationCredentials = Depends(clerk_guard),
