@@ -2,6 +2,8 @@
 
 A full-stack app that turns consultation notes (or uploaded PDFs/images) into AI-generated summaries. Built with Next.js, FastAPI, Clerk, OpenAI, and Postgres. Deployable on AWS (App Runner + ECR) or Vercel.
 
+**Live app (AWS App Runner):** [Healthcare Consultation Assistant — MediNotes Pro](https://6m96uii6va.us-east-1.awsapprunner.com)
+
 ---
 
 ## STAR — What I Did
@@ -100,9 +102,38 @@ A full-stack app that turns consultation notes (or uploaded PDFs/images) into AI
 
 ---
 
+## How I Deployed on AWS (Step-by-Step) and Auto Scaling
+
+This is how the app was deployed so users can open it on the internet, and how auto scaling is set up.
+
+### 1. Build and push the Docker image to ECR
+- **What it does:** ECR is where your container image lives. App Runner pulls the image from here to run your app.
+- **What I did:** Built the image from `saas/` with `-f ../dockerfile`, tagged it as `consultation-app:latest`, logged in to ECR, and ran `docker push` to the repository `507190177471.dkr.ecr.us-east-1.amazonaws.com/consultation-app:latest`.
+
+### 2. Create an App Runner service
+- **What it does:** App Runner runs your container and gives you a public URL (and optional custom domain). It handles load balancing and scaling.
+- **What I did:** In AWS Console → **App Runner** → **Create service**. Chose "Container registry" → **Amazon ECR**. Selected the **consultation-app** repository and tag **latest**. App Runner uses this to run the same image you pushed.
+
+### 3. Configure the service (port, env, health)
+- **What it does:** The service must know which port your app uses, which env vars to pass (OpenAI, Clerk, etc.), and how to check if the app is healthy.
+- **What I did:** Set **Port** to **8000** (FastAPI listens here). Added **Environment variables** (e.g. `OPENAI_API_KEY`, `CLERK_SECRET_KEY`, `CLERK_JWKS_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, optional `POSTGRES_URL`). The app exposes **/health**; App Runner uses it for health checks so it only sends traffic to healthy instances.
+
+### 4. Auto scaling (what it is and how it's set)
+- **What it does:** Auto scaling increases or decreases the number of running instances based on traffic. More users → more instances; less traffic → scale down to save cost.
+- **What I did:** In the App Runner service configuration, under **Auto scaling** (or "Configure service" → scaling): set **Min size** (e.g. 1 so the app is always available) and **Max size** (e.g. 3 or 5 so it doesn't scale infinitely). Optionally set **Max concurrency** per instance (how many requests one instance handles before scaling out). App Runner then scales within these limits automatically; no separate "auto scaling" service is needed — it's built into App Runner.
+
+### 5. Deploy and get the URL
+- **What it does:** App Runner deploys your image and assigns a default domain. That's the link users open in a browser.
+- **What I did:** After the service was created and the first deployment finished, I copied the **Default domain** from the App Runner service page. That URL is the one to share with users.
+
+**Live app URL:** [https://6m96uii6va.us-east-1.awsapprunner.com](https://6m96uii6va.us-east-1.awsapprunner.com) — Healthcare Consultation Assistant (MediNotes Pro).
+
+---
+
 ## Summary
 
 - **What I did:** Built MediNotes Pro — consultation notes (or PDF/image) in, AI summary out, with login, optional premium, and history stored in Postgres.  
 - **STAR:** Situation (need for a cloud-ready summarizer) → Task (secure, streaming app with history) → Action (Next.js + FastAPI + Clerk + OpenAI + Postgres + Docker) → Result (one app, deployable on AWS or Vercel).  
 - **Run:** Frontend in `saas` with `npm run dev`; backend via `server.py`; set OpenAI + Clerk (+ optional Postgres).  
-- **Deploy AWS:** Build from `saas` with `-f ../dockerfile`, push to ECR, run on App Runner on port 8000 with env vars set.
+- **Deploy AWS:** Build from `saas` with `-f ../dockerfile`, push to ECR, run on App Runner on port 8000 with env vars set.  
+- **Live URL:** [https://6m96uii6va.us-east-1.awsapprunner.com](https://6m96uii6va.us-east-1.awsapprunner.com)
