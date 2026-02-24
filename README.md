@@ -1,4 +1,25 @@
-# MediNotes Pro — SAAS Agent
+sequenceDiagram
+    participant U as User
+    participant F as Frontend (Next.js)
+    participant C as Clerk
+    participant B as Backend (FastAPI)
+    participant O as OpenAI
+
+    U->>F: Sign in
+    F->>C: Auth
+    C->>F: JWT
+    U->>F: Submit form (notes / file)
+    F->>F: getToken()
+    F->>B: POST /api/consultation + JWT
+    B->>C: Verify JWT (JWKS)
+    C-->>B: Valid
+    B->>B: Resolve notes (or extract from file)
+    B->>O: Chat completions (stream)
+    O-->>B: Stream chunks
+    B-->>F: SSE stream
+    F-->>U: Show summary text
+    F->>B: POST /api/history (save)
+    B->>B: Save to Postgres# MediNotes Pro — SAAS Agent
 
 **Healthcare Consultation Assistant** that turns your consultation notes (or uploaded PDFs and images) into clear AI-generated summaries, action items, and follow-ups. One app: sign in, add notes or a file, get a live summary, and see your past summaries.
 
